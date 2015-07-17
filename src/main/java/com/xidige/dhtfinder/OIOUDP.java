@@ -14,9 +14,9 @@ public class OIOUDP extends BaseUDP{
 	}
 	
 	@Override
-	public void send(byte[] msg, InetAddress host, int port) throws IOException {
-		System.out.printf("[SENDTO : %s:%d]\n",host.getHostAddress(),port);
-		DatagramPacket packet = new DatagramPacket(msg, msg.length, host, port);
+	public void send(byte[] msg, String host, int port) throws IOException {
+		System.out.printf("[SENDTO : %s:%d]\n",host,port);
+		DatagramPacket packet = new DatagramPacket(msg, msg.length, InetAddress.getByName(host), port);
 		try {
 			client.send(packet);
 		} catch (IOException e) {

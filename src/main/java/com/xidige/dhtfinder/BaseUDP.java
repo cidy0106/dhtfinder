@@ -13,7 +13,7 @@ public abstract class BaseUDP implements UDPSend {
 		this.onUDPRecv = onUDPRecv;
 	}
 	@Override
-	public abstract void send(byte[] msg, InetAddress target, int port)
+	public abstract void send(byte[] msg, String target, int port)
 			throws IOException;
 	public abstract void start()throws IOException;
 	

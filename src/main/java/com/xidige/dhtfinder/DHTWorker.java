@@ -5,12 +5,14 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import com.xidige.dhtfinder.BaseUDP.UDPRecv;
 import com.xidige.dhtfinder.KRPC.Krpc;
@@ -25,6 +27,9 @@ public class DHTWorker implements UDPRecv {
 	private UDPSend sender = null;
 
 	private ExecutorService boss;
+	private ScheduledExecutorService findNodeBoss;
+	
+	private NodeKeeper nodesContainer=NodeKeeper.getInstance();
 
 	public DHTWorker(String nodeid, UDPSend sender) throws IOException {
 		this.defualtNodeid = nodeid;
@@ -35,23 +40,38 @@ public class DHTWorker implements UDPRecv {
 		self = out.toByteArray();
 
 		boss = Executors.newSingleThreadExecutor();
-		// ScheduledExecutorService
-		// ses=Executors.newSingleThreadScheduledExecutor();
-		// ses.scheduleAtFixedRate(new Runnable() {
-		// @Override
-		// public void run() {
-		// // 发数据出去
-		//
-		// }
-		// }, 0, 1, TimeUnit.SECONDS);
-
+		findNodeBoss=Executors.newSingleThreadScheduledExecutor();
+		findNodeBoss.scheduleAtFixedRate(scheduleSender, 0, 1, TimeUnit.SECONDS);
 	}
+	
+	private Runnable scheduleSender=new Runnable() {		
+		@Override
+		public void run() {
+			// 发数据出去
+			NodeInfo ni= nodesContainer.poll();
+			if (ni!=null) {
+				sendFindNode(ni.getNodeid(), ni.getIp(), ni.getPort());	
+			}else{
+				//发起find_node
+				sendFindNode(defualtNodeid,"router.bittorrent.com", 6881);
+				sendFindNode(defualtNodeid,"dht.transmissionbt.com", 6881);
+				sendFindNode(defualtNodeid,"router.utorrent.com", 6881);
+				
+				try {
+					Thread.sleep(500);
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+		}
+	};
 
 	public byte[] findSelf() throws IOException {
 		return self;
 	}
 
-	private void sendByThread(final byte[] byteArray, final InetAddress client,
+	private void sendByThread(final byte[] byteArray, final String client,
 			final int port) {
 		boss.execute(new Runnable() {
 			@Override
@@ -63,15 +83,19 @@ public class DHTWorker implements UDPRecv {
 			}
 		});
 	}
+	
 
 	private class Worker implements Runnable {
-		private InetAddress client;
+		private String host;
 		private int port;
 		private byte[] msg;
 		private KRPC krpc;
 
 		public Worker(InetAddress client, int port, byte[] msg, KRPC krpc) {
-			this.client = client;
+			this(client.getHostAddress(), port, msg, krpc);
+		}
+		public Worker(String client, int port, byte[] msg, KRPC krpc) {
+			this.host = client;
 			this.port = port;
 			this.msg = msg;
 			this.krpc = krpc;
@@ -100,23 +124,23 @@ public class DHTWorker implements UDPRecv {
 					if (Krpc.ping.equals(qtype)) {
 						System.out.println("REC: ping");
 						// 需要回复
-						processPing(rs, client, port);
+						processPing(rs, host, port);
 						return;
 					} else if (Krpc.announce_peer.equals(qtype)) {
 						System.out.println("REC: announce_peer");
 						// 解析出infohash即可，不需要回复
-						processAnnouncePeer(rs, client, port);
+						processAnnouncePeer(rs, host, port);
 						return;
 					} else if (Krpc.get_peers.equals(qtype)) {
 						// get_peers请求，回复空node
-						responseGetPeers(rs, client, port);
+						responseGetPeers(rs, host, port);
 						return;
 					}
-					responseAny(rs, client, port);
+					responseAny(rs, host, port);
 					return;
 				}
 				System.out.println("REC: any other request");
-				processAny(rs, client, port);
+				processAny(rs, host, port);
 
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
@@ -124,7 +148,7 @@ public class DHTWorker implements UDPRecv {
 				if (rs != null) {
 					System.out.println("出现异常，回复[202] ");
 					try {
-						responseAny(rs, client, port);
+						responseAny(rs, host, port);
 					} catch (IOException e1) {
 					}
 				}
@@ -155,7 +179,17 @@ public class DHTWorker implements UDPRecv {
 		return null;
 	}
 
-	private void responseAny(Map<String, Object> rs, InetAddress client,
+	private void sendFindNode(String nodeid,String target,int port){
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		try {
+			krpc.wrapKrpc(findNode(nodeid), out);
+			sendByThread(out.toByteArray(), target, port);
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}	
+	}
+	private void responseAny(Map<String, Object> rs, String client,
 			int port) throws IOException {
 		Map<String, Object> any = new TreeMap<String, Object>(KRPC.MYCOMPARATOR);
 		any.put(Krpc.t, rs.get(Krpc.t));
@@ -172,7 +206,7 @@ public class DHTWorker implements UDPRecv {
 		sendByThread(out.toByteArray(), client, port);
 	}
 
-	private void responseGetPeers(Map<String, Object> rs, InetAddress client,
+	private void responseGetPeers(Map<String, Object> rs, String client,
 			int port) throws IOException {
 		// 需要t，和自己的node
 		Map<String, Object> getPeers = new TreeMap<String, Object>(
@@ -192,7 +226,7 @@ public class DHTWorker implements UDPRecv {
 		sendByThread(out.toByteArray(), client, port);
 	}
 
-	private void processAny(Map<String, Object> rs, InetAddress target, int port)
+	private void processAny(Map<String, Object> rs, String target, int port)
 			throws IOException {
 		Map<String, Object> pongMap = new TreeMap<String, Object>(
 				KRPC.MYCOMPARATOR);
@@ -210,7 +244,7 @@ public class DHTWorker implements UDPRecv {
 	}
 
 	private void processAnnouncePeer(Map<String, Object> rs,
-			InetAddress target, int port) throws IOException {
+			String target, int port) throws IOException {
 		// 解析a里面的info_hash
 		Map<String, Object> aMap = (Map<String, Object>) rs.get(Request.a);
 		String infohash = (String) aMap.get(Request.info_hash);
@@ -219,7 +253,7 @@ public class DHTWorker implements UDPRecv {
 		processAny(rs, target, port);
 	}
 
-	private void processPing(Map<String, Object> rs, InetAddress target,
+	private void processPing(Map<String, Object> rs, String target,
 			int port) throws IOException {
 		processAny(rs, target, port);
 	}
@@ -229,14 +263,7 @@ public class DHTWorker implements UDPRecv {
 		Map<String, Object> temp = (Map<String, Object>) msg.get(Response.r);
 		String nodes = (String) temp.get(Response.nodes);
 		List<NodeInfo> infos = KRPC.nodebyte2NodeInfo(nodes);
-		if (infos != null && infos.size() > 0) {
-			for (Iterator<NodeInfo> iterator = infos.iterator(); iterator
-					.hasNext();) {
-				NodeInfo nodeInfo = (NodeInfo) iterator.next();
-				sendByThread(self, InetAddress.getByName(nodeInfo.getIp()),
-						nodeInfo.getPort());
-			}
-		}
+		nodesContainer.addAll(infos);
 	}
 
 	public  Map<String, Object> findNode(String nodeid) {

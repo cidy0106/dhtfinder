@@ -1,7 +1,6 @@
 package com.xidige.dhtfinder;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
@@ -21,7 +20,7 @@ public class NIOUDP extends BaseUDP{
 	}
 	
 	@Override
-	public void send(byte[] msg, InetAddress target, int port)
+	public void send(byte[] msg, String target, int port)
 			throws IOException {
 		Message m=new Message();
 		m.msg=msg;
@@ -63,7 +62,7 @@ public class NIOUDP extends BaseUDP{
 										Message m=msgs.poll();
 										if (m!=null) {
 											DatagramChannel dc=(DatagramChannel) sk.channel();
-											System.out.printf("[SENDTO : %s:%d]\n",m.target.getHostAddress(),m.port);
+											System.out.printf("[SENDTO : %s:%d]\n",m.target,m.port);
 											dc.send(ByteBuffer.wrap(m.msg),new InetSocketAddress(m.target, m.port));
 										}
 									}									
@@ -81,7 +80,7 @@ public class NIOUDP extends BaseUDP{
 	
 	private static class Message{
 		byte[] msg;
-		InetAddress target;
+		String target;
 		int port;
 	}
 }

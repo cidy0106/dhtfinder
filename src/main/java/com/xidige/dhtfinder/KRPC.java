@@ -73,6 +73,13 @@ public class KRPC {
 		public void setPort(int port) {
 			this.port = port;
 		}
+		@Override
+		public boolean equals(Object obj) {
+			if (obj instanceof NodeInfo) {
+				return nodeid!=null && nodeid.equals(((NodeInfo)obj).nodeid);
+			}
+			return false;
+		}
 	}
 	
 	public static List<NodeInfo> nodebyte2NodeInfo(byte[]buf){
